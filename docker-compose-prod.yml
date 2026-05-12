@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  mysql-prod:
+    image: mysql:8.0
+    container_name: order_system_mysql_prod
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: order_system_prod
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_prod_data:/var/lib/mysql
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./src/main/resources/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=500
+      - --innodb_buffer_pool_size=1G
+      - --innodb_log_file_size=256M
+      - --innodb_flush_log_at_trx_commit=2
+      - --sync_binlog=0
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - order_network_prod
+
+  redis-prod:
+    image: redis:7-alpine
+    container_name: order_system_redis_prod
+    restart: always
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_prod_data:/data
+    command:
+      - redis-server
+      - --appendonly
+      - yes
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - order_network_prod
+
+  app-optimized:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: order_system_app_optimized
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: prod,optimized
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-prod:3306/order_system_prod?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root123
+      SPRING_REDIS_HOST: redis-prod
+      SPRING_REDIS_PORT: 6379
+      JAVA_OPTS: -Xms512m -Xmx1024m
+    ports:
+      - "8081:8080"
+    depends_on:
+      mysql-prod:
+        condition: service_healthy
+      redis-prod:
+        condition: service_healthy
+    networks:
+      - order_network_prod
+
+volumes:
+  mysql_prod_data:
+  redis_prod_data:
+
+networks:
+  order_network_prod:
+    driver: bridge

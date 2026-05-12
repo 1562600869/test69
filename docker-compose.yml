@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  mysql-dev:
+    image: mysql:8.0
+    container_name: order_system_mysql_dev
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: order_system_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./src/main/resources/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=200
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - order_network_dev
+
+  redis-dev:
+    image: redis:7-alpine
+    container_name: order_system_redis_dev
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - order_network_dev
+
+  app-baseline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: order_system_app_baseline
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: dev,baseline
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-dev:3306/order_system_dev?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root123
+      SPRING_REDIS_HOST: redis-dev
+      SPRING_REDIS_PORT: 6379
+      JAVA_OPTS: -Xms512m -Xmx1024m
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql-dev:
+        condition: service_healthy
+      redis-dev:
+        condition: service_healthy
+    networks:
+      - order_network_dev
+
+volumes:
+  mysql_dev_data:
+  redis_dev_data:
+
+networks:
+  order_network_dev:
+    driver: bridge
